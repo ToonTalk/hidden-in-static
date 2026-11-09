@@ -1,0 +1,658 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hidden in Static</title>
+<meta name="description" content="Type a message and it appears only as moving noise on a static-noise background. Pause it and the text vanishes.">
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo+Black&family=IBM+Plex+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: the whole window is the noise screen; one instrument panel floats over the lower-left corner. */
+:root {
+  --ink: #0a0b0c;
+  --panel: rgba(12, 13, 15, 0.9);
+  --line: #2b2f34;
+  --fg: #eceef0;
+  --dim: #8e959d;
+  --signal: #ffcf33;
+  --display: "Archivo Black", "Arial Black", Impact, sans-serif;
+  --mono: "IBM Plex Mono", ui-monospace, Consolas, "Courier New", monospace;
+  color-scheme: dark;
+}
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; overflow: hidden; background: var(--ink); color: var(--fg); }
+body {
+  font-family: var(--mono);
+  font-size: 13px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+#screen {
+  position: fixed; top: 0; left: 0;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.panel {
+  position: fixed;
+  left: max(16px, env(safe-area-inset-left, 0px));
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  width: min(400px, calc(100% - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+  box-sizing: border-box;
+  display: grid;
+  gap: 12px;
+  padding: 14px 16px 16px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+  z-index: 2;
+}
+.panel.typing { top: calc(8px + env(safe-area-inset-top, 0px)); bottom: auto; }
+.head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
+.head h1 {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 17px;
+  letter-spacing: 0.01em;
+}
+.note { margin: 0; color: var(--dim); line-height: 1.45; max-width: 60ch; }
+label.cap, .cap {
+  font-size: 11px; text-transform: uppercase; letter-spacing: 0.09em; color: var(--dim);
+}
+textarea {
+  width: 100%; box-sizing: border-box;
+  min-height: 3.2em; max-height: 8em; resize: vertical;
+  padding: 8px 10px;
+  font: 600 15px/1.35 var(--mono);
+  color: var(--fg);
+  background: #000;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.field { display: grid; gap: 6px; }
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.row.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.seg { display: flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.seg button {
+  flex: 1; padding: 7px 6px;
+  font: 600 12px var(--mono);
+  color: var(--dim); background: transparent; border: 0; cursor: pointer;
+}
+.seg button + button { border-left: 1px solid var(--line); }
+.seg button[aria-pressed="true"] { color: #000; background: var(--fg); }
+.range-head { display: flex; justify-content: space-between; }
+.range-head output { font-size: 11px; color: var(--fg); font-variant-numeric: tabular-nums; }
+input[type="range"] { width: 100%; margin: 0; accent-color: var(--signal); }
+.actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.btn {
+  padding: 9px 14px;
+  font: 600 13px var(--mono);
+  border-radius: 4px; cursor: pointer;
+  color: var(--fg); background: transparent; border: 1px solid var(--line);
+}
+.btn.primary { color: #000; background: var(--signal); border-color: var(--signal); min-width: 7.5em; }
+.icon-btn {
+  padding: 2px 8px; font: 600 12px var(--mono);
+  color: var(--dim); background: transparent; border: 1px solid var(--line); border-radius: 4px; cursor: pointer;
+}
+.keys { color: var(--dim); font-size: 11px; }
+.btn:disabled { opacity: 0.55; cursor: progress; }
+.gif-row { display: flex; gap: 12px; align-items: flex-start; padding-top: 12px; border-top: 1px solid var(--line); }
+.gif-row img {
+  width: 96px; height: 64px; object-fit: contain; flex: none;
+  background: #000; border: 1px solid var(--line); border-radius: 3px;
+  image-rendering: pixelated;
+}
+.gif-info { display: grid; gap: 8px; min-width: 0; }
+.gif-msg { margin: 0; color: var(--fg); line-height: 1.45; font-size: 12px; }
+.gif-btns { display: flex; gap: 8px; flex-wrap: wrap; }
+kbd {
+  font: 600 10px var(--mono); padding: 1px 5px; border: 1px solid var(--line); border-radius: 3px; color: var(--fg);
+}
+#show {
+  position: fixed;
+  left: max(16px, env(safe-area-inset-left, 0px));
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  z-index: 2;
+  padding: 6px 10px;
+  font: 600 11px var(--mono);
+  color: var(--dim); background: rgba(0,0,0,0.55);
+  border: 1px solid var(--line); border-radius: 4px; cursor: pointer;
+  opacity: 0.6;
+}
+#show:hover, #show:focus-visible { opacity: 1; }
+a:focus-visible, button:focus-visible, textarea:focus-visible, input:focus-visible { outline: 2px solid var(--signal); outline-offset: 2px; }
+@media (max-width: 520px) {
+  .panel { gap: 10px; padding: 12px; }
+  .note { display: none; }
+  .keys { display: none; }
+}
+.head-btns { display: flex; gap: 6px; }
+a.icon-btn { text-decoration: none; }
+a.icon-btn:hover, .icon-btn:hover { color: var(--fg); }
+</style>
+</head>
+<body>
+
+<canvas id="screen" aria-label="Animated noise. The text you type is visible only while the noise moves."></canvas>
+
+<section class="panel" id="panel" aria-label="Controls">
+  <div class="head">
+    <h1>Hidden in Static</h1>
+    <div class="head-btns">
+      <a class="icon-btn" id="source" href="https://github.com/ToonTalk/hidden-in-static" target="_blank" rel="noopener" title="See the source code on GitHub (MIT license)">Source</a>
+      <button class="icon-btn" id="hide" type="button" title="Hide the panel (H)">Hide</button>
+    </div>
+  </div>
+  <p class="note">Every pixel is random noise. The letters are the pixels that keep changing, so you only see them while it runs. Pause and they disappear.</p>
+  <div class="field">
+    <label class="cap" for="msg">Your text</label>
+    <textarea id="msg" rows="2" spellcheck="false">NOW YOU
+SEE ME</textarea>
+  </div>
+  <div class="row">
+    <div class="field">
+      <span class="cap" id="lbl-color">Noise</span>
+      <div class="seg" role="group" aria-labelledby="lbl-color">
+        <button type="button" id="bw" aria-pressed="true">B&amp;W</button>
+        <button type="button" id="color" aria-pressed="false">Color</button>
+      </div>
+    </div>
+    <div class="field">
+      <span class="cap" id="lbl-motion">Letters</span>
+      <div class="seg" role="group" aria-labelledby="lbl-motion">
+        <button type="button" id="shimmer" aria-pressed="true" title="Fresh noise every frame">Flicker</button>
+        <button type="button" id="drift" aria-pressed="false" title="The noise inside the letters slides downward">Flow</button>
+      </div>
+    </div>
+  </div>
+  <div class="row three">
+    <div class="field">
+      <div class="range-head"><label class="cap" for="size">Size</label><output id="size-out" for="size">Fit</output></div>
+      <input type="range" id="size" min="10" max="100" step="1" value="100">
+    </div>
+    <div class="field">
+      <div class="range-head"><label class="cap" for="grain">Grain</label><output id="grain-out" for="grain">3 px</output></div>
+      <input type="range" id="grain" min="1" max="10" step="1" value="3">
+    </div>
+    <div class="field">
+      <div class="range-head"><label class="cap" for="fps">Speed</label><output id="fps-out" for="fps">30 fps</output></div>
+      <input type="range" id="fps" min="2" max="60" step="1" value="30">
+    </div>
+  </div>
+  <div class="actions">
+    <button class="btn primary" id="pause" type="button" aria-pressed="false">Pause</button>
+    <button class="btn" id="gif" type="button" title="Record 2 seconds of the animation as a looping GIF">Save GIF</button>
+    <span class="keys"><kbd>Space</kbd> pause &nbsp;<kbd>H</kbd> hide</span>
+  </div>
+  <div class="gif-row" id="gif-row" hidden>
+    <img id="gif-preview" alt="Preview of the saved GIF">
+    <div class="gif-info">
+      <p id="gif-msg" class="gif-msg" role="status"></p>
+      <div class="gif-btns">
+        <button class="icon-btn" id="gif-again" type="button" hidden>Save again</button>
+        <button class="icon-btn" id="gif-close" type="button">Close</button>
+      </div>
+    </div>
+  </div>
+</section>
+<button id="show" type="button" hidden>Controls</button>
+
+<script>
+(() => {
+  const cv = document.getElementById('screen');
+  const ctx = cv.getContext('2d', { alpha: false });
+  const mcv = document.createElement('canvas');
+  const mctx = mcv.getContext('2d', { willReadFrequently: true });
+  const $ = (id) => document.getElementById(id);
+  const FONT = '"Archivo Black", "Arial Black", Impact, sans-serif';
+  const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  const state = {
+    text: $('msg').value,
+    color: false,
+    motion: 'shimmer',
+    grain: 3,
+    size: 100,
+    fps: reduced ? 12 : 30,
+    paused: false,
+    panel: true,
+  };
+  try {
+    const saved = JSON.parse(localStorage.getItem('hidden-in-static:v1') || 'null');
+    if (saved && typeof saved === 'object') {
+      if (typeof saved.text === 'string') state.text = saved.text;
+      if (typeof saved.color === 'boolean') state.color = saved.color;
+      if (saved.motion === 'shimmer' || saved.motion === 'drift') state.motion = saved.motion;
+      if (Number.isInteger(saved.grain) && saved.grain >= 1 && saved.grain <= 10) state.grain = saved.grain;
+      if (Number.isInteger(saved.fps) && saved.fps >= 2 && saved.fps <= 60) state.fps = saved.fps;
+      if (Number.isInteger(saved.size) && saved.size >= 10 && saved.size <= 100) state.size = saved.size;
+    }
+  } catch (e) {}
+  function save() {
+    try {
+      const { text, color, motion, grain, fps, size } = state;
+      localStorage.setItem('hidden-in-static:v1', JSON.stringify({ text, color, motion, grain, fps, size }));
+    } catch (e) {}
+  }
+
+  // xorshift32: fast, good enough for visual noise
+  let seed = ((Math.random() * 4294967296) >>> 0) || 1;
+  function rnd() {
+    seed ^= seed << 13; seed ^= seed >>> 17; seed ^= seed << 5;
+    return seed >>> 0;
+  }
+  const BLACK = 0xff000000, WHITE = 0xffffffff;
+  function pix(r) {
+    return state.color ? (0xff000000 | (r & 0xffffff)) : ((r & 0x80000000) ? WHITE : BLACK);
+  }
+  function fill(arr) { for (let i = 0; i < arr.length; i++) arr[i] = pix(rnd()); }
+
+  let W = 0, H = 0, img = null, buf = null, field = null, resizeTimer = 0;
+  let maskIdx = new Int32Array(0), maskX = new Int32Array(0), maskY = new Int32Array(0);
+  let box = { x: 0, y: 0, w: 0, h: 0 };
+  let flowOffset = 0;
+
+  function resize() {
+    const dpr = window.devicePixelRatio || 1;
+    const g = state.grain;
+    W = Math.max(1, Math.ceil(window.innerWidth * dpr / g));
+    H = Math.max(1, Math.ceil(window.innerHeight * dpr / g));
+    cv.width = W; cv.height = H;
+    cv.style.width = (W * g / dpr) + 'px';
+    cv.style.height = (H * g / dpr) + 'px';
+    img = ctx.createImageData(W, H);
+    buf = new Uint32Array(img.data.buffer);
+    field = new Uint32Array(W * H);
+    fill(buf); fill(field);
+    flowOffset = 0;
+    buildMask();
+    ctx.putImageData(img, 0, 0);
+  }
+
+  // Draw the text once, off screen, and remember which noise pixels belong to letters.
+  function buildMask() {
+    const m = maskFor(W, H);
+    maskIdx = m.idx; maskX = m.x; maskY = m.y; box = m.box;
+  }
+  function maskFor(W, H) {
+    mcv.width = W; mcv.height = H;
+    mctx.clearRect(0, 0, W, H);
+    const lines = state.text.replace(/\r/g, '').split('\n');
+    while (lines.length && !lines[0].trim()) lines.shift();
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+    if (!lines.length) return maskFrom([], W, H);
+
+    mctx.textAlign = 'center';
+    mctx.textBaseline = 'middle';
+    mctx.font = `100px ${FONT}`;
+    let widest = 1;
+    for (const l of lines) widest = Math.max(widest, mctx.measureText(l).width);
+    const lineH = 1.08;
+    const byWidth = 100 * (W * 0.9) / widest;
+    const byHeight = (H * 0.78) / (lines.length * lineH);
+    // 100% = the largest size that fits the screen; smaller values scale down from there.
+    const size = Math.max(4, Math.min(byWidth, byHeight) * state.size / 100);
+    mctx.font = `${size}px ${FONT}`;
+    mctx.fillStyle = '#fff';
+    const mid = (lines.length - 1) / 2;
+    lines.forEach((l, i) => mctx.fillText(l, W / 2, H / 2 + (i - mid) * size * lineH));
+
+    const a = mctx.getImageData(0, 0, W, H).data;
+    const idx = [];
+    for (let i = 0, p = 3; i < W * H; i++, p += 4) if (a[p] >= 128) idx.push(i);
+    return maskFrom(idx, W, H);
+  }
+
+  function maskFrom(list, W, H) {
+    const idx = Int32Array.from(list);
+    const xs = new Int32Array(idx.length), ys = new Int32Array(idx.length);
+    let x0 = W, y0 = H, x1 = -1, y1 = -1;
+    for (let k = 0; k < idx.length; k++) {
+      const x = idx[k] % W, y = (idx[k] / W) | 0;
+      xs[k] = x; ys[k] = y;
+      if (x < x0) x0 = x; if (x > x1) x1 = x;
+      if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+    const b = idx.length ? { x: x0, y: y0, w: x1 - x0 + 1, h: y1 - y0 + 1 } : { x: 0, y: 0, w: 0, h: 0 };
+    return { idx, x: xs, y: ys, box: b };
+  }
+
+  // Advance one frame: only letter pixels change. The background is never touched.
+  // `s` is a snapshot of the scene so GIF recording is unaffected by edits made meanwhile.
+  function scene() {
+    return { idx: maskIdx, x: maskX, y: maskY, box, field, W, H, motion: state.motion };
+  }
+  function advance(target, s, off) {
+    const n = s.idx.length;
+    if (s.motion === 'shimmer') {
+      for (let k = 0; k < n; k++) target[s.idx[k]] = pix(rnd());
+      return off;
+    }
+    off = (off + 1) % s.H;
+    for (let k = 0; k < n; k++) {
+      let y = s.y[k] - off;
+      if (y < 0) y += s.H;
+      target[s.idx[k]] = s.field[y * s.W + s.x[k]];
+    }
+    return off;
+  }
+  function step() {
+    if (!maskIdx.length) return;
+    flowOffset = advance(buf, scene(), flowOffset);
+    ctx.putImageData(img, 0, 0, box.x, box.y, box.w, box.h);
+  }
+
+  // ---- GIF recording ----
+  // A small GIF89a writer: fixed palette, LZW, and after the first frame only the
+  // letter area is stored, with unchanged pixels transparent, so the file stays small.
+  class Bytes {
+    constructor(n) { this.a = new Uint8Array(Math.max(1024, n)); this.n = 0; }
+    need(k) {
+      if (this.n + k <= this.a.length) return;
+      const b = new Uint8Array(Math.max(this.a.length * 2, this.n + k));
+      b.set(this.a.subarray(0, this.n)); this.a = b;
+    }
+    byte(v) { this.need(1); this.a[this.n++] = v; }
+    u16(v) { this.byte(v & 255); this.byte((v >> 8) & 255); }
+    bytes(arr) { this.need(arr.length); this.a.set(arr, this.n); this.n += arr.length; }
+    str(s) { for (let i = 0; i < s.length; i++) this.byte(s.charCodeAt(i)); }
+  }
+  const STAMP = new Int32Array(1 << 20), CODE = new Uint16Array(1 << 20);
+  let GEN = 0;
+  function lzw(ix, minCode) {
+    const clear = 1 << minCode, eoi = clear + 1;
+    let size = minCode + 1, next = eoi + 1;
+    const out = new Uint8Array(ix.length * 2 + 64);
+    let o = 0, cur = 0, shift = 0;
+    const emit = (c) => {
+      cur |= c << shift; shift += size;
+      while (shift >= 8) { out[o++] = cur & 255; cur >>>= 8; shift -= 8; }
+    };
+    GEN++;
+    emit(clear);
+    let prefix = ix[0];
+    for (let i = 1; i < ix.length; i++) {
+      const k = ix[i], key = (prefix << 8) | k;
+      if (STAMP[key] === GEN) { prefix = CODE[key]; continue; }
+      emit(prefix);
+      if (next === 4096) {
+        emit(clear); next = eoi + 1; size = minCode + 1; GEN++;
+      } else {
+        if (next >= (1 << size)) size++;
+        STAMP[key] = GEN; CODE[key] = next++;
+      }
+      prefix = k;
+    }
+    emit(prefix); emit(eoi);
+    if (shift > 0) out[o++] = cur & 255;
+    return out.subarray(0, o);
+  }
+
+  // Crop to the text with a margin of background around it.
+  function cropFor(s) {
+    if (!s.box.w) return { x0: 0, y0: 0, x1: s.W, y1: s.H };
+    const m = Math.max(6, Math.round(s.box.h * 0.25));
+    return {
+      x0: Math.max(0, s.box.x - m), y0: Math.max(0, s.box.y - m),
+      x1: Math.min(s.W, s.box.x + s.box.w + m), y1: Math.min(s.H, s.box.y + s.box.h + m),
+    };
+  }
+
+  async function recordGif(onProgress) {
+    const color = state.color;
+    const fpsNow = state.fps;
+    let s = scene(), work, off;
+    let c = cropFor(s);
+    // Noise doesn't compress, so keep the GIF's grid within a pixel budget.
+    // If the screen's grain is finer than that, record the same text at a coarser grain.
+    const budget = color ? 90000 : 150000;
+    const f = Math.ceil(Math.sqrt(((c.x1 - c.x0) * (c.y1 - c.y0)) / budget));
+    if (f <= 1) {
+      work = buf.slice(); off = flowOffset;
+    } else {
+      const W2 = Math.max(1, Math.ceil(s.W / f)), H2 = Math.max(1, Math.ceil(s.H / f));
+      const m = maskFor(W2, H2);
+      const field2 = new Uint32Array(W2 * H2); fill(field2);
+      work = new Uint32Array(W2 * H2); fill(work);
+      s = { idx: m.idx, x: m.x, y: m.y, box: m.box, field: field2, W: W2, H: H2, motion: s.motion };
+      off = 0;
+      c = cropFor(s);
+    }
+    const { x0, y0, x1, y1 } = c;
+    const cw = x1 - x0, ch = y1 - y0;
+    let k = Math.max(1, Math.min(4, Math.floor(720 / cw)));
+    while (k > 1 && cw * k * ch * k > 520000) k--;
+    const OW = cw * k, OH = ch * k;
+    const frames = Math.max(6, Math.min(60, Math.round(fpsNow * 2)));
+    const delay = Math.max(2, Math.round(100 / fpsNow));
+    const palBits = color ? 8 : 2, T = color ? 255 : 2, minCode = Math.max(2, palBits);
+    const q = color
+      ? (v) => { const i = ((v & 255) >> 5) << 5 | (((v >>> 8) & 255) >> 5) << 2 | ((v >>> 16) & 255) >> 6; return i === 255 ? 254 : i; }
+      : (v) => (v & 255) ? 1 : 0;
+
+    const g = new Bytes(OW * OH * 2);
+    g.str('GIF89a'); g.u16(OW); g.u16(OH);
+    g.byte(0x80 | (7 << 4) | (palBits - 1)); g.byte(0); g.byte(0);
+    if (color) {
+      for (let i = 0; i < 256; i++) {
+        g.byte(Math.round(((i >> 5) & 7) * 255 / 7));
+        g.byte(Math.round(((i >> 2) & 7) * 255 / 7));
+        g.byte(Math.round((i & 3) * 255 / 3));
+      }
+    } else {
+      g.bytes([0, 0, 0, 255, 255, 255, 128, 128, 128, 0, 0, 0]);
+    }
+    g.byte(0x21); g.byte(0xff); g.byte(11); g.str('NETSCAPE2.0'); g.byte(3); g.byte(1); g.u16(0); g.byte(0);
+
+    const prev = new Uint8Array(cw * ch);
+    for (let f = 0; f < frames; f++) {
+      if (f > 0) off = advance(work, s, off);
+      const r = (f === 0 || !s.box.w) ? { x: x0, y: y0, w: cw, h: ch } : s.box;
+      const rw = r.w * k, rh = r.h * k;
+      const ix = new Uint8Array(rw * rh);
+      for (let gy = 0; gy < r.h; gy++) {
+        const rowStart = gy * k * rw;
+        for (let gx = 0; gx < r.w; gx++) {
+          const sx = r.x + gx, sy = r.y + gy;
+          const qi = q(work[sy * s.W + sx]);
+          const p = (sy - y0) * cw + (sx - x0);
+          const outI = (f === 0 || qi !== prev[p]) ? qi : T;
+          prev[p] = qi;
+          ix.fill(outI, rowStart + gx * k, rowStart + gx * k + k);
+        }
+        for (let rep = 1; rep < k; rep++) ix.copyWithin(rowStart + rep * rw, rowStart, rowStart + rw);
+      }
+      g.byte(0x21); g.byte(0xf9); g.byte(4);
+      g.byte((1 << 2) | (f === 0 ? 0 : 1)); g.u16(delay); g.byte(T); g.byte(0);
+      g.byte(0x2c); g.u16((r.x - x0) * k); g.u16((r.y - y0) * k); g.u16(rw); g.u16(rh); g.byte(0);
+      g.byte(minCode);
+      const data = lzw(ix, minCode);
+      for (let i = 0; i < data.length; i += 255) {
+        const len = Math.min(255, data.length - i);
+        g.byte(len); g.bytes(data.subarray(i, i + len));
+      }
+      g.byte(0);
+      onProgress(f + 1, frames);
+      await new Promise((res) => setTimeout(res, 0));
+    }
+    g.byte(0x3b);
+    return { blob: new Blob([g.a.slice(0, g.n)], { type: 'image/gif' }), w: OW, h: OH, frames, bytes: g.n, seconds: frames * delay / 100 };
+  }
+
+  let last = 0, seenW = -1, seenH = -1, seenDpr = -1;
+  function loop(t) {
+    requestAnimationFrame(loop);
+    // Catch every size change, including ones that fire no resize event (frames that start at 0×0).
+    if (window.innerWidth !== seenW || window.innerHeight !== seenH || window.devicePixelRatio !== seenDpr) {
+      seenW = window.innerWidth; seenH = window.innerHeight; seenDpr = window.devicePixelRatio;
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(resize, 120);
+    }
+    if (state.paused) return;
+    const interval = 1000 / state.fps;
+    if (t - last >= interval - 2) {
+      last = t;
+      step();
+    }
+  }
+
+  // ---- controls ----
+  const msg = $('msg');
+  msg.value = state.text;
+  msg.addEventListener('input', () => { state.text = msg.value; buildMask(); save(); });
+
+  function setPressed(onId, offId, on) {
+    $(onId).setAttribute('aria-pressed', String(on));
+    $(offId).setAttribute('aria-pressed', String(!on));
+  }
+  function setColor(c) {
+    state.color = c;
+    setPressed('color', 'bw', c);
+    if (buf) { fill(buf); fill(field); ctx.putImageData(img, 0, 0); }
+    save();
+  }
+  $('bw').addEventListener('click', () => setColor(false));
+  $('color').addEventListener('click', () => setColor(true));
+
+  function setMotion(m) {
+    state.motion = m;
+    setPressed('drift', 'shimmer', m === 'drift');
+    save();
+  }
+  $('shimmer').addEventListener('click', () => setMotion('shimmer'));
+  $('drift').addEventListener('click', () => setMotion('drift'));
+
+  const grain = $('grain'), fps = $('fps'), sizeIn = $('size');
+  function showRanges() {
+    $('size-out').textContent = state.size === 100 ? 'Fit' : state.size + '%';
+    $('grain-out').textContent = state.grain + ' px';
+    $('fps-out').textContent = state.fps + ' fps';
+  }
+  grain.value = state.grain; fps.value = state.fps; sizeIn.value = state.size;
+  sizeIn.addEventListener('input', () => { state.size = +sizeIn.value; showRanges(); buildMask(); save(); });
+  grain.addEventListener('input', () => { state.grain = +grain.value; showRanges(); resize(); save(); });
+  fps.addEventListener('input', () => { state.fps = +fps.value; showRanges(); save(); });
+
+  function togglePause() {
+    state.paused = !state.paused;
+    const b = $('pause');
+    b.textContent = state.paused ? 'Play' : 'Pause';
+    b.setAttribute('aria-pressed', String(state.paused));
+  }
+  $('pause').addEventListener('click', togglePause);
+  cv.addEventListener('click', togglePause);
+
+  const gifBtn = $('gif'), gifRow = $('gif-row'), gifMsg = $('gif-msg'), gifAgain = $('gif-again');
+  let lastGif = null;
+  const mb = (n) => n >= 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+  function gifName() {
+    const slug = state.text.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40);
+    return 'hidden-in-static' + (slug ? '-' + slug : '') + '.gif';
+  }
+  const SAVE_HELP = 'Right-click or long-press the preview to save it.';
+  async function offerSave(gif) {
+    const name = gifName();
+    const facts = `${gif.w}×${gif.h} px, ${gif.frames} frames, ${mb(gif.bytes)}`;
+    if (window.claude && typeof window.claude.use === 'function') {
+      // Inside claude.ai: files leave the page only through the downloads capability.
+      let dl = null;
+      try { dl = await window.claude.use('downloads'); } catch (e) {}
+      if (!dl) { gifMsg.textContent = `GIF ready (${facts}). Saving files isn't available here. ${SAVE_HELP}`; return; }
+      try {
+        await dl.save({ filename: name, data: gif.blob });
+        gifMsg.textContent = `Saved ${name} (${facts})`;
+      } catch (e) {
+        const code = e && e.code;
+        gifMsg.textContent =
+          code === 'declined' ? `Not saved. The GIF is still ready (${facts}).` :
+          code === 'rate_limited' ? 'A save prompt is already open. Finish that one, then press Save again.' :
+          code === 'too_large' ? 'That GIF is too large to save here. Raise the grain or lower the size, then try again.' :
+          `GIF ready (${facts}). Saving isn't available here. ${SAVE_HELP}`;
+      }
+    } else {
+      // Opened as a plain web page: an ordinary download link works.
+      const url = URL.createObjectURL(gif.blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = name;
+      document.body.appendChild(a); a.click(); a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 30000);
+      gifMsg.textContent = `Downloaded ${name} (${facts})`;
+    }
+  }
+  gifBtn.addEventListener('click', async () => {
+    gifBtn.disabled = true;
+    gifRow.hidden = false; gifAgain.hidden = true;
+    $('gif-preview').removeAttribute('src');
+    try {
+      const gif = await recordGif((f, n) => { gifMsg.textContent = `Recording frame ${f} of ${n}…`; });
+      lastGif = gif;
+      // A data: URL displays reliably in every host (blob: images can break in app webviews).
+      $('gif-preview').src = await new Promise((res, rej) => {
+        const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = rej; fr.readAsDataURL(gif.blob);
+      });
+      gifAgain.hidden = false;
+      await offerSave(gif);
+    } catch (e) {
+      gifMsg.textContent = 'Couldn’t make the GIF. Try a bigger grain or shorter text.';
+    } finally {
+      gifBtn.disabled = false;
+    }
+  });
+  gifAgain.addEventListener('click', () => { if (lastGif) offerSave(lastGif); });
+  $('gif-close').addEventListener('click', () => { gifRow.hidden = true; });
+
+  function setPanel(on) {
+    state.panel = on;
+    $('panel').hidden = !on;
+    $('show').hidden = on;
+  }
+  $('hide').addEventListener('click', () => setPanel(false));
+  $('show').addEventListener('click', () => setPanel(true));
+
+  window.addEventListener('keydown', (e) => {
+    if (e.target === msg || e.ctrlKey || e.metaKey || e.altKey) return;
+    if (e.code === 'Space') {
+      if (e.target instanceof HTMLButtonElement) return; // let the button act on its own
+      e.preventDefault(); togglePause();
+    } else if (e.key === 'h' || e.key === 'H') {
+      setPanel(!state.panel);
+    }
+  });
+
+  // Small screens: move the panel to the top while typing so the keyboard can't cover it.
+  const narrow = matchMedia('(max-width: 700px)');
+  let blurTimer = 0;
+  msg.addEventListener('focus', () => {
+    clearTimeout(blurTimer);
+    if (narrow.matches) $('panel').classList.add('typing');
+  });
+  msg.addEventListener('blur', () => {
+    blurTimer = setTimeout(() => $('panel').classList.remove('typing'), 300);
+  });
+
+
+  setPressed('color', 'bw', state.color);
+  setPressed('drift', 'shimmer', state.motion === 'drift');
+  showRanges();
+  resize();
+  requestAnimationFrame(loop);
+
+  // Canvas text doesn't trigger web-font loading; ask for the face, then redraw the mask with it.
+  if (document.fonts && document.fonts.load) {
+    Promise.race([
+      document.fonts.load('100px "Archivo Black"'),
+      new Promise((r) => setTimeout(r, 4000)),
+    ]).then(() => buildMask()).catch(() => {});
+  }
+})();
+</script>
+</body>
+</html>
